@@ -21,7 +21,7 @@ services:
     image: mysql:8.0
     command: --max_allowed_packet=256M
     ports:
-      - '3309:3306'
+      - '${DB_FORWARD_PORT:-3310}:3306'
     environment:
       MYSQL_ROOT_PASSWORD: secret
       MYSQL_DATABASE: CustomerDB
