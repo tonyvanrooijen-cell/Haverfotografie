@@ -58,6 +58,7 @@ $hiddenLogoSrc = '';
 $authError = '';
 $visitSummaryRows = [];
 $recentVisits = [];
+$todayVisitCount = 0;
 
 if (!$isAdminPath && (isset($_GET['admin']) || isset($_GET['new']) || isset($_GET['edit']) || isset($_GET['photos']) || isset($_GET['config']) || isset($_GET['visits'])) && !isset($_GET['view'])) {
     $redirectParams = $_GET;
@@ -335,6 +336,25 @@ try {
             exit;
         }
 
+        if (($_POST['action'] ?? '') === 'update-prio') {
+            header('Content-Type: application/json; charset=utf-8');
+
+            $prioId = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+            $prioValue = filter_var($_POST['prio'] ?? null, FILTER_VALIDATE_INT);
+
+            if ($prioId <= 0 || $prioValue === false) {
+                http_response_code(422);
+                echo json_encode(['ok' => false, 'message' => 'Ongeldige prioriteit.']);
+                exit;
+            }
+
+            $prioStmt = $pdo->prepare('UPDATE HaverFotografie SET prio = :prio WHERE id = :id');
+            $prioStmt->execute(['prio' => $prioValue, 'id' => $prioId]);
+
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
         if (($_POST['action'] ?? '') === 'delete-shoot') {
             $deleteId = isset($_POST['id']) ? (int) $_POST['id'] : 0;
 
@@ -464,7 +484,11 @@ try {
     }
 
     if ($display) {
-        $displayStmt = $pdo->query('SELECT id, titel, categorie FROM HaverFotografie ORDER BY categorie, titel');
+        $displayStmt = $pdo->query(
+            'SELECT id, titel, categorie, prio
+             FROM HaverFotografie
+             ORDER BY COALESCE(prio, 2147483647), categorie, titel'
+        );
         $displayShoots = $displayStmt->fetchAll();
         $visibleDisplayShoots = [];
         foreach ($displayShoots as $shoot) {
@@ -527,6 +551,10 @@ try {
         );
         $visitSummaryRows = $visitSummaryStmt->fetchAll();
 
+        $todayVisitCount = (int) $pdo->query(
+            'SELECT COUNT(*) FROM HaverFotografieVisits WHERE DATE(visited_at) = CURDATE()'
+        )->fetchColumn();
+
         $recentVisitsStmt = $pdo->query(
             'SELECT v.visited_at, v.ip_address, v.user_agent, v.referer, h.titel
              FROM HaverFotografieVisits v
@@ -537,7 +565,7 @@ try {
         $recentVisits = $recentVisitsStmt->fetchAll();
     }
 
-    $stmt = $pdo->query('SELECT id, titel, categorie, lokatie FROM HaverFotografie');
+    $stmt = $pdo->query('SELECT id, titel, categorie, lokatie, prio FROM HaverFotografie');
     $rows = $stmt->fetchAll();
     $needsRichTextEditor = $edit || $create || $photos;
 } catch (PDOException $e) {
@@ -580,6 +608,9 @@ try {
             color: var(--display-text);
             margin-top: 0;
             padding: 1rem 1.5rem;
+        }
+        .site-footer a {
+            color: inherit;
         }
         table { border-collapse: collapse; width: 100%; table-layout: fixed; }
         table + .admin-actions {
@@ -776,15 +807,6 @@ try {
             max-height: 44px;
             width: auto;
         }
-        .display-menu-link {
-            color: inherit;
-            padding: 0.35rem 0.1rem;
-            text-decoration: none;
-            white-space: nowrap;
-        }
-        .display-menu-link:hover {
-            text-decoration: underline;
-        }
         .category-menu {
             position: relative;
         }
@@ -932,6 +954,32 @@ try {
         }
         .muted-cell {
             color: #6b7280;
+        }
+        .prio-editor {
+            align-items: center;
+            display: flex;
+            gap: 0.45rem;
+        }
+        .prio-input {
+            box-sizing: border-box;
+            max-width: 5.5rem;
+            padding: 0.35rem 0.45rem;
+            width: 100%;
+        }
+        .prio-status {
+            display: inline-block;
+            font-size: 1.1rem;
+            font-weight: 700;
+            min-width: 1.2rem;
+        }
+        .prio-status.is-saving {
+            color: #6b7280;
+        }
+        .prio-status.is-saved {
+            color: #16803a;
+        }
+        .prio-status.is-error {
+            color: #b00020;
         }
         .delete-button {
             background: none;
@@ -1081,7 +1129,7 @@ try {
             </div>
         </form>
     <?php elseif ($visitsScreen): ?>
-        <h2>Bezoeken per shoot</h2>
+        <h2>Bezoeken per shoot — <?php echo h($todayVisitCount); ?> bezoeken vandaag</h2>
         <?php if (count($visitSummaryRows) === 0): ?>
             <p>Geen shoots gevonden.</p>
         <?php else: ?>
@@ -1170,11 +1218,6 @@ try {
                         </div>
                     </details>
                 <?php endforeach; ?>
-                <?php if ($hiddenShoot): ?>
-                    <a class="display-menu-link" href="<?php echo h($publicPath . '?shoot=' . $hiddenShoot['id']); ?>">
-                        Contact
-                    </a>
-                <?php endif; ?>
             </header>
             <div class="display-content">
                 <?php if ($selectedShoot): ?>
@@ -1228,7 +1271,9 @@ try {
                     </main>
                 <?php endif; ?>
             </div>
-            <footer class="site-footer">&copy; 2026 Haver Fotografie</footer>
+            <footer class="site-footer">
+                &copy; 2026 Haver Fotografie<?php if ($hiddenShoot): ?>, neem contact met mij op, door <a href="<?php echo h($publicPath . '?shoot=' . $hiddenShoot['id']); ?>">hier te klikken</a>.<?php endif; ?>
+            </footer>
         </div>
     <?php elseif ($photos): ?>
         <h1>Foto's uploaden</h1>
@@ -1331,9 +1376,10 @@ try {
         <?php else: ?>
             <table>
                 <colgroup>
-                    <col style="width: 42%;">
+                    <col style="width: 34%;">
                     <col style="width: 12%;">
-                    <col style="width: 26%;">
+                    <col style="width: 22%;">
+                    <col style="width: 12%;">
                     <col style="width: 20%;">
                 </colgroup>
                 <thead>
@@ -1341,6 +1387,7 @@ try {
                         <th>Titel</th>
                         <th>Categorie</th>
                         <th>Locatie</th>
+                        <th>Prio</th>
                         <th>Acties</th>
                     </tr>
                 </thead>
@@ -1350,6 +1397,18 @@ try {
                             <td><?php echo h($row['titel']); ?></td>
                             <td><?php echo h($row['categorie']); ?></td>
                             <td><?php echo h($row['lokatie']); ?></td>
+                            <td>
+                                <div class="prio-editor">
+                                    <input
+                                        class="prio-input"
+                                        type="number"
+                                        value="<?php echo h($row['prio']); ?>"
+                                        data-shoot-id="<?php echo h($row['id']); ?>"
+                                        aria-label="Prioriteit van <?php echo h($row['titel']); ?>"
+                                    >
+                                    <span class="prio-status" aria-live="polite"></span>
+                                </div>
+                            </td>
                             <td class="table-actions">
                                 <a href="?edit=<?php echo $row['id']; ?>">Wijzig</a>
                                 |
@@ -1432,6 +1491,46 @@ try {
             foto1Input.value = '';
             showPhoto('');
             pasteField.focus();
+        });
+
+        document.querySelectorAll('.prio-input').forEach((input) => {
+            let saveTimer = null;
+            const status = input.parentElement.querySelector('.prio-status');
+
+            input.addEventListener('input', () => {
+                window.clearTimeout(saveTimer);
+                status.className = 'prio-status is-saving';
+                status.textContent = '…';
+                status.title = 'Bezig met opslaan';
+
+                saveTimer = window.setTimeout(async () => {
+                    const formData = new FormData();
+                    formData.set('action', 'update-prio');
+                    formData.set('id', input.dataset.shootId);
+                    formData.set('prio', input.value);
+
+                    try {
+                        const response = await fetch(<?php echo json_encode($adminDashboardUrl); ?>, {
+                            method: 'POST',
+                            body: formData,
+                            credentials: 'same-origin'
+                        });
+                        const result = await response.json();
+
+                        if (!response.ok || !result.ok) {
+                            throw new Error(result.message || 'Opslaan mislukt');
+                        }
+
+                        status.className = 'prio-status is-saved';
+                        status.textContent = '✓';
+                        status.title = 'Opgeslagen';
+                    } catch (error) {
+                        status.className = 'prio-status is-error';
+                        status.textContent = '!';
+                        status.title = error.message || 'Opslaan mislukt';
+                    }
+                }, 500);
+            });
         });
 
         if (window.tinymce) {
