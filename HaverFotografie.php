@@ -776,6 +776,15 @@ try {
             max-height: 44px;
             width: auto;
         }
+        .display-menu-link {
+            color: inherit;
+            padding: 0.35rem 0.1rem;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .display-menu-link:hover {
+            text-decoration: underline;
+        }
         .category-menu {
             position: relative;
         }
@@ -1161,6 +1170,11 @@ try {
                         </div>
                     </details>
                 <?php endforeach; ?>
+                <?php if ($hiddenShoot): ?>
+                    <a class="display-menu-link" href="<?php echo h($publicPath . '?shoot=' . $hiddenShoot['id']); ?>">
+                        Contact
+                    </a>
+                <?php endif; ?>
             </header>
             <div class="display-content">
                 <?php if ($selectedShoot): ?>
