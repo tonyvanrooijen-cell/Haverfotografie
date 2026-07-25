@@ -543,6 +543,7 @@ try {
         $visitSummaryStmt = $pdo->query(
             'SELECT h.id, h.titel, h.categorie, h.lokatie,
                     COUNT(v.id) AS visit_count,
+                    SUM(CASE WHEN DATE(v.visited_at) = CURDATE() THEN 1 ELSE 0 END) AS today_visit_count,
                     MAX(v.visited_at) AS last_visited_at
              FROM HaverFotografie h
              LEFT JOIN HaverFotografieVisits v ON v.shoot_id = h.id
@@ -1135,11 +1136,12 @@ try {
         <?php else: ?>
             <table>
                 <colgroup>
-                    <col style="width: 30%;">
-                    <col style="width: 14%;">
-                    <col style="width: 20%;">
-                    <col style="width: 12%;">
-                    <col style="width: 24%;">
+                    <col style="width: 27%;">
+                    <col style="width: 13%;">
+                    <col style="width: 18%;">
+                    <col style="width: 10%;">
+                    <col style="width: 10%;">
+                    <col style="width: 22%;">
                 </colgroup>
                 <thead>
                     <tr>
@@ -1147,6 +1149,7 @@ try {
                         <th>Categorie</th>
                         <th>Locatie</th>
                         <th>Bezoeken</th>
+                        <th>Vandaag</th>
                         <th>Laatst bezocht</th>
                     </tr>
                 </thead>
@@ -1157,6 +1160,7 @@ try {
                             <td><?php echo h($visitRow['categorie']); ?></td>
                             <td><?php echo h($visitRow['lokatie']); ?></td>
                             <td><?php echo h($visitRow['visit_count']); ?></td>
+                            <td><?php echo h($visitRow['today_visit_count']); ?></td>
                             <td class="<?php echo $visitRow['last_visited_at'] ? '' : 'muted-cell'; ?>">
                                 <?php echo h($visitRow['last_visited_at'] ?: 'Nog niet bezocht'); ?>
                             </td>
