@@ -879,6 +879,114 @@ try {
             line-height: 1.05;
             margin: 0;
         }
+        .hero-title-row {
+            align-items: center;
+            display: flex;
+            gap: 0.8rem;
+        }
+        .gallery-open {
+            align-items: center;
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: 50%;
+            color: inherit;
+            cursor: pointer;
+            display: inline-flex;
+            flex: 0 0 auto;
+            height: 2.8rem;
+            justify-content: center;
+            padding: 0;
+            transition: background 160ms ease, transform 160ms ease;
+            width: 2.8rem;
+        }
+        .gallery-open:hover,
+        .gallery-open:focus-visible {
+            background: rgba(255, 255, 255, 0.3);
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+            transform: scale(1.05);
+        }
+        .gallery-open svg {
+            height: 1.45rem;
+            width: 1.45rem;
+        }
+        .photo-viewer[hidden] {
+            display: none;
+        }
+        .photo-viewer-nav[hidden] {
+            display: none;
+        }
+        .photo-viewer {
+            align-items: center;
+            background: rgba(0, 0, 0, 0.96);
+            display: flex;
+            inset: 0;
+            justify-content: center;
+            position: fixed;
+            z-index: 1000;
+        }
+        .photo-viewer-image {
+            display: block;
+            height: 100%;
+            max-height: 100vh;
+            max-width: 100vw;
+            object-fit: contain;
+            width: 100%;
+        }
+        .photo-viewer-close,
+        .photo-viewer-nav {
+            align-items: center;
+            background: rgba(0, 0, 0, 0.48);
+            border: 1px solid rgba(255, 255, 255, 0.65);
+            border-radius: 50%;
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            font-family: Arial, sans-serif;
+            justify-content: center;
+            position: absolute;
+            z-index: 2;
+        }
+        .photo-viewer-close {
+            font-size: 2rem;
+            height: 3rem;
+            right: 1rem;
+            top: 1rem;
+            width: 3rem;
+        }
+        .photo-viewer-nav {
+            font-size: 2.6rem;
+            height: 4rem;
+            line-height: 1;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4rem;
+        }
+        .photo-viewer-nav:hover,
+        .photo-viewer-nav:focus-visible,
+        .photo-viewer-close:hover,
+        .photo-viewer-close:focus-visible {
+            background: rgba(255, 255, 255, 0.2);
+            outline: 2px solid #fff;
+            outline-offset: 2px;
+        }
+        .photo-viewer-prev {
+            left: 1rem;
+        }
+        .photo-viewer-next {
+            right: 1rem;
+        }
+        .photo-viewer-counter {
+            background: rgba(0, 0, 0, 0.55);
+            border-radius: 999px;
+            bottom: 1rem;
+            color: #fff;
+            left: 50%;
+            padding: 0.4rem 0.8rem;
+            position: absolute;
+            transform: translateX(-50%);
+            z-index: 2;
+        }
         .hero-meta {
             display: flex;
             flex-wrap: wrap;
@@ -1017,6 +1125,21 @@ try {
             }
             .hero-title {
                 font-size: clamp(1.6rem, 7vw, 2.6rem);
+            }
+            .gallery-open {
+                height: 2.5rem;
+                width: 2.5rem;
+            }
+            .photo-viewer-nav {
+                font-size: 2rem;
+                height: 3rem;
+                width: 3rem;
+            }
+            .photo-viewer-prev {
+                left: 0.5rem;
+            }
+            .photo-viewer-next {
+                right: 0.5rem;
             }
             .hero-details {
                 padding: 0 1rem 1.5rem;
@@ -1248,7 +1371,16 @@ try {
                             <img id="displayHeroPhoto" src="<?php echo h($heroPhoto); ?>" alt="<?php echo h($selectedShoot['titel']); ?>">
                         <?php endif; ?>
                         <div class="hero-panel">
-                            <h1 class="hero-title"><?php echo h($selectedShoot['titel']); ?></h1>
+                            <div class="hero-title-row">
+                                <h1 class="hero-title"><?php echo h($selectedShoot['titel']); ?></h1>
+                                <?php if ($heroPhoto !== ''): ?>
+                                    <button type="button" class="gallery-open" id="openPhotoViewer" aria-label="Bekijk alle foto's van deze shoot op volledig scherm" title="Bekijk alle foto's">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path fill="currentColor" d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9Zm3 13a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Zm0-2a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
+                                        </svg>
+                                    </button>
+                                <?php endif; ?>
+                            </div>
                             <?php if ($selectedShoot['categorie'] !== '' || $selectedShoot['lokatie'] !== ''): ?>
                                 <div class="hero-meta">
                                     <?php if ($selectedShoot['categorie'] !== ''): ?>
@@ -1269,6 +1401,15 @@ try {
                     <script>
                         window.displayPhotos = <?php echo json_encode($displayPhotos, JSON_UNESCAPED_SLASHES); ?>;
                     </script>
+                    <?php if ($heroPhoto !== ''): ?>
+                        <div class="photo-viewer" id="photoViewer" role="dialog" aria-modal="true" aria-label="Foto's van <?php echo h($selectedShoot['titel']); ?>" hidden>
+                            <button type="button" class="photo-viewer-close" id="closePhotoViewer" aria-label="Sluiten">&times;</button>
+                            <button type="button" class="photo-viewer-nav photo-viewer-prev" id="previousPhoto" aria-label="Vorige foto">&#8249;</button>
+                            <img class="photo-viewer-image" id="photoViewerImage" src="" alt="">
+                            <button type="button" class="photo-viewer-nav photo-viewer-next" id="nextPhoto" aria-label="Volgende foto">&#8250;</button>
+                            <div class="photo-viewer-counter" id="photoViewerCounter" aria-live="polite"></div>
+                        </div>
+                    <?php endif; ?>
                 <?php else: ?>
                     <main class="display-empty">
                         <p>Kies bovenin een shoot om de foto te tonen.</p>
@@ -1599,6 +1740,75 @@ try {
         }
 
         startHeroSlideshow();
+
+        const photoViewer = document.getElementById('photoViewer');
+        const openPhotoViewer = document.getElementById('openPhotoViewer');
+        const closePhotoViewer = document.getElementById('closePhotoViewer');
+        const previousPhoto = document.getElementById('previousPhoto');
+        const nextPhoto = document.getElementById('nextPhoto');
+        const photoViewerImage = document.getElementById('photoViewerImage');
+        const photoViewerCounter = document.getElementById('photoViewerCounter');
+        let viewerIndex = 0;
+
+        function showViewerPhoto(index) {
+            const photos = window.displayPhotos || [];
+            if (!photos.length) {
+                return;
+            }
+
+            viewerIndex = (index + photos.length) % photos.length;
+            photoViewerImage.src = photos[viewerIndex];
+            photoViewerImage.alt = `Foto ${viewerIndex + 1} van ${photos.length}`;
+            photoViewerCounter.textContent = `${viewerIndex + 1} / ${photos.length}`;
+            previousPhoto.hidden = photos.length <= 1;
+            nextPhoto.hidden = photos.length <= 1;
+        }
+
+        function openViewer() {
+            if (!photoViewer || !window.displayPhotos?.length) {
+                return;
+            }
+
+            showViewerPhoto(slideshowIndex);
+            photoViewer.hidden = false;
+            document.body.style.overflow = 'hidden';
+            closePhotoViewer.focus();
+        }
+
+        function closeViewer() {
+            if (!photoViewer || photoViewer.hidden) {
+                return;
+            }
+
+            photoViewer.hidden = true;
+            photoViewerImage.src = '';
+            document.body.style.overflow = '';
+            openPhotoViewer.focus();
+        }
+
+        openPhotoViewer?.addEventListener('click', openViewer);
+        closePhotoViewer?.addEventListener('click', closeViewer);
+        previousPhoto?.addEventListener('click', () => showViewerPhoto(viewerIndex - 1));
+        nextPhoto?.addEventListener('click', () => showViewerPhoto(viewerIndex + 1));
+        photoViewer?.addEventListener('click', (event) => {
+            if (event.target === photoViewer) {
+                closeViewer();
+            }
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (!photoViewer || photoViewer.hidden) {
+                return;
+            }
+
+            if (event.key === 'Escape') {
+                closeViewer();
+            } else if (event.key === 'ArrowLeft') {
+                showViewerPhoto(viewerIndex - 1);
+            } else if (event.key === 'ArrowRight') {
+                showViewerPhoto(viewerIndex + 1);
+            }
+        });
 
     </script>
 </body>
