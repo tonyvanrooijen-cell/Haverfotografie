@@ -581,6 +581,7 @@ try {
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>HaverFotografie</title>
     <link rel="icon" type="image/svg+xml" href="<?php echo h($faviconPath); ?>">
     <?php if ($needsRichTextEditor): ?>
@@ -590,11 +591,13 @@ try {
         body { font-family: Arial, sans-serif; margin: 2rem; }
         body.display-body {
             height: 100vh;
+            height: 100dvh;
             margin: 0;
             overflow: hidden;
         }
         body.admin-body {
             height: 100vh;
+            height: 100dvh;
             margin: 0;
             overflow: hidden;
             padding: 0;
@@ -607,8 +610,9 @@ try {
         .display-body .site-footer {
             background: var(--display-background);
             color: var(--display-text);
+            flex-shrink: 0;
             margin-top: 0;
-            padding: 1rem 1.5rem;
+            padding: 1rem 1.5rem max(1rem, env(safe-area-inset-bottom));
         }
         .site-footer a {
             color: inherit;
@@ -693,6 +697,7 @@ try {
             display: flex;
             flex-direction: column;
             height: 100vh;
+            height: 100dvh;
             margin: 0 auto;
             max-width: 1660px;
             overflow: hidden;
@@ -781,6 +786,7 @@ try {
             flex-direction: column;
             font-family: var(--display-font);
             height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
         .display-header {
@@ -1016,6 +1022,7 @@ try {
         }
         .display-content {
             flex: 1;
+            min-height: 0;
             overflow-y: auto;
         }
         .config-grid {
