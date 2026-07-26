@@ -608,8 +608,8 @@ try {
             padding: 1rem 0;
         }
         .display-body .site-footer {
-            background: var(--display-background);
-            color: var(--display-text);
+            background: var(--display-header);
+            color: var(--display-overlay-text);
             flex-shrink: 0;
             margin-top: 0;
             padding: 1rem 1.5rem max(1rem, env(safe-area-inset-bottom));
@@ -798,6 +798,8 @@ try {
             flex-wrap: wrap;
             gap: 1rem;
             padding: 1rem 1.5rem;
+            position: relative;
+            z-index: 30;
         }
         .display-brand {
             color: inherit;
@@ -850,6 +852,87 @@ try {
         }
         .category-options a:hover {
             background: rgba(0, 0, 0, 0.08);
+        }
+        .mobile-category-menu {
+            display: none;
+            margin-left: auto;
+        }
+        .mobile-category-menu > summary {
+            align-items: center;
+            border: 1px solid currentColor;
+            border-radius: 0.35rem;
+            cursor: pointer;
+            display: flex;
+            height: 2.75rem;
+            justify-content: center;
+            list-style: none;
+            width: 2.75rem;
+        }
+        .mobile-category-menu > summary::-webkit-details-marker {
+            display: none;
+        }
+        .hamburger-icon,
+        .hamburger-icon::before,
+        .hamburger-icon::after {
+            background: currentColor;
+            border-radius: 999px;
+            display: block;
+            height: 2px;
+            position: relative;
+            width: 1.35rem;
+        }
+        .hamburger-icon::before,
+        .hamburger-icon::after {
+            content: "";
+            left: 0;
+            position: absolute;
+        }
+        .hamburger-icon::before {
+            top: -0.42rem;
+        }
+        .hamburger-icon::after {
+            top: 0.42rem;
+        }
+        .mobile-category-menu[open] .hamburger-icon {
+            background: transparent;
+        }
+        .mobile-category-menu[open] .hamburger-icon::before {
+            top: 0;
+            transform: rotate(45deg);
+        }
+        .mobile-category-menu[open] .hamburger-icon::after {
+            top: 0;
+            transform: rotate(-45deg);
+        }
+        .mobile-category-options {
+            background: var(--display-background);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+            color: var(--display-text);
+            left: 0;
+            max-height: calc(100dvh - 5rem);
+            overflow-y: auto;
+            padding: 0.75rem 1rem 1rem;
+            position: absolute;
+            right: 0;
+            top: 100%;
+        }
+        .mobile-category-group + .mobile-category-group {
+            border-top: 1px solid rgba(127, 127, 127, 0.3);
+            margin-top: 0.65rem;
+            padding-top: 0.65rem;
+        }
+        .mobile-category-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            margin: 0 0 0.25rem;
+            opacity: 0.7;
+            text-transform: uppercase;
+        }
+        .mobile-category-options a {
+            color: var(--display-text);
+            display: block;
+            padding: 0.65rem 0.35rem;
+            text-decoration: none;
         }
         .hero-photo {
             margin: 0;
@@ -1113,13 +1196,20 @@ try {
         }
         @media (max-width: 720px) {
             .display-header {
-                align-items: flex-start;
+                flex-wrap: nowrap;
+                padding: 0.75rem 1rem;
             }
             .display-brand {
                 margin-right: 0;
             }
             .display-brand img {
                 max-height: 34px;
+            }
+            .display-header > .category-menu {
+                display: none;
+            }
+            .mobile-category-menu {
+                display: block;
             }
             .hero-photo img {
                 width: 100%;
@@ -1352,6 +1442,23 @@ try {
                         </div>
                     </details>
                 <?php endforeach; ?>
+                <details class="mobile-category-menu">
+                    <summary aria-label="Open categorieënmenu">
+                        <span class="hamburger-icon" aria-hidden="true"></span>
+                    </summary>
+                    <nav class="mobile-category-options" aria-label="Categorieën">
+                        <?php foreach ($shootGroups as $category => $shoots): ?>
+                            <section class="mobile-category-group">
+                                <h2 class="mobile-category-title"><?php echo h($category); ?></h2>
+                                <?php foreach ($shoots as $shoot): ?>
+                                    <a href="<?php echo h($publicPath . '?shoot=' . $shoot['id']); ?>">
+                                        <?php echo h($shoot['titel']); ?>
+                                    </a>
+                                <?php endforeach; ?>
+                            </section>
+                        <?php endforeach; ?>
+                    </nav>
+                </details>
             </header>
             <div class="display-content">
                 <?php if ($selectedShoot): ?>
@@ -1713,14 +1820,25 @@ try {
             });
         });
 
+        const mobileCategoryMenu = document.querySelector('.mobile-category-menu');
+        const mobileCategorySummary = mobileCategoryMenu?.querySelector('summary');
+
+        mobileCategoryMenu?.addEventListener('toggle', () => {
+            mobileCategorySummary?.setAttribute(
+                'aria-label',
+                mobileCategoryMenu.open ? 'Sluit categorieënmenu' : 'Open categorieënmenu'
+            );
+        });
+
         document.addEventListener('click', (event) => {
-            if (event.target.closest('.category-menu')) {
+            if (event.target.closest('.category-menu, .mobile-category-menu')) {
                 return;
             }
 
             document.querySelectorAll('.category-menu[open]').forEach((menu) => {
                 menu.removeAttribute('open');
             });
+            mobileCategoryMenu?.removeAttribute('open');
         });
 
         const heroPhoto = document.getElementById('displayHeroPhoto');
