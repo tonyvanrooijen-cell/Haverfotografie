@@ -8,11 +8,13 @@ $pdo->exec('CREATE DATABASE `' . $database . '`');
 try {
     $pdo->exec('USE `' . $database . '`');
     ensureShootRequestTable($pdo);
+    $pdo->exec('ALTER TABLE HaverFotografieRequests DROP COLUMN requested_time');
     ensureShootRequestTable($pdo);
-    $data = ['name' => 'Test Bezoeker', 'email' => 'visitor@example.test', 'phone' => '+31 6 12345678', 'date' => '2099-06-20', 'description' => "Familiefoto\nBuiten in het park <test>"];
+    $data = ['name' => 'Test Bezoeker', 'email' => 'visitor@example.test', 'phone' => '+31 6 12345678', 'date' => '2099-06-20', 'time' => '14:30', 'description' => "Familiefoto\nBuiten in het park <test>"];
     $token = bin2hex(random_bytes(32));
     $id = saveShootRequest($pdo, $data, $token);
     $row = $pdo->query('SELECT * FROM HaverFotografieRequests')->fetch(PDO::FETCH_ASSOC);
+    if ($row['requested_time'] !== '14:30:00') { throw new RuntimeException('Time not saved'); }
     foreach (['name', 'email', 'phone', 'description'] as $key) {
         if ($row[$key] !== $data[$key]) { throw new RuntimeException('Lost field: ' . $key); }
     }
@@ -34,7 +36,14 @@ try {
     if ((int) $pdo->query('SELECT COUNT(*) FROM HaverFotografieRequests WHERE mail_status = \'failed\'')->fetchColumn() !== 1) {
         throw new RuntimeException('Failed mail request not retained');
     }
-    echo "PASS: table creation, complete storage, duplicate protection, required fields, retained request after mail failure\n";
+    $otherId = saveShootRequest($pdo, $data, bin2hex(random_bytes(32)));
+    if (!deleteShootRequest($pdo, $id) || deleteShootRequest($pdo, $id)) {
+        throw new RuntimeException('Delete result incorrect');
+    }
+    if ((int) $pdo->query('SELECT id FROM HaverFotografieRequests')->fetchColumn() !== $otherId) {
+        throw new RuntimeException('Wrong request deleted');
+    }
+    echo "PASS: migration, time storage, duplicate protection, required fields, mail failure, targeted deletion\n";
 } finally {
     $pdo->exec('DROP DATABASE `' . $database . '`');
 }

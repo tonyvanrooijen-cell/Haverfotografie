@@ -4,7 +4,7 @@ declare(strict_types=1);
 function shootRequestInput(array $input): array
 {
     $data = [];
-    foreach (['name', 'email', 'phone', 'date', 'description'] as $field) {
+    foreach (['name', 'email', 'phone', 'date', 'time', 'description'] as $field) {
         $data[$field] = is_string($input[$field] ?? null) ? trim($input[$field], " \t\n\r\v") : '';
     }
     return $data;
@@ -26,6 +26,9 @@ function validateShootRequest(array $data): string
     }
     if (strlen($data['phone']) > 40 || !preg_match('/^\+?[0-9 ()\.\-]+$/D', $data['phone']) || strlen(preg_replace('/\D/', '', $data['phone'])) < 7) {
         return 'Vul een geldig telefoonnummer in.';
+    }
+    if (!preg_match('/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/D', $data['time'])) {
+        return 'Vul een geldige tijd in (uren en minuten).';
     }
     $timezone = new DateTimeZone('Europe/Amsterdam');
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D', $data['date'])) {
@@ -50,10 +53,18 @@ function ensureShootRequestTable(PDO $pdo): void
         email VARCHAR(254) NOT NULL,
         phone VARCHAR(40) NOT NULL,
         requested_date DATE NOT NULL,
+        requested_time TIME NULL,
         description TEXT NOT NULL,
         created_at DATETIME NOT NULL,
         mail_status VARCHAR(16) NOT NULL DEFAULT 'pending'
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    if (!$pdo->query("SHOW COLUMNS FROM HaverFotografieRequests LIKE 'requested_time'")->fetch()) {
+        try {
+            $pdo->exec('ALTER TABLE HaverFotografieRequests ADD COLUMN requested_time TIME NULL AFTER requested_date');
+        } catch (PDOException $e) {
+            if (($e->errorInfo[1] ?? null) !== 1060) { throw $e; }
+        }
+    }
 }
 
 function saveShootRequest(PDO $pdo, array $data, string $token): int
@@ -63,30 +74,59 @@ function saveShootRequest(PDO $pdo, array $data, string $token): int
         throw new InvalidArgumentException('Incomplete or invalid shoot request.');
     }
     $stmt = $pdo->prepare('INSERT INTO HaverFotografieRequests
-        (submission_token, name, email, phone, requested_date, description, created_at)
-        VALUES (:token, :name, :email, :phone, :date, :description, :created_at)');
+        (submission_token, name, email, phone, requested_date, requested_time, description, created_at)
+        VALUES (:token, :name, :email, :phone, :date, :time, :description, :created_at)');
     $stmt->execute($data + ['token' => $token, 'created_at' => gmdate('Y-m-d H:i:s')]);
     return (int) $pdo->lastInsertId();
 }
 
-function sendShootRequest(array $data, string $recipient): void
+function deleteShootRequest(PDO $pdo, int $id): bool
+{
+    $stmt = $pdo->prepare('DELETE FROM HaverFotografieRequests WHERE id = :id');
+    $stmt->execute(['id' => $id]);
+    return $stmt->rowCount() === 1;
+}
+
+function validateMailSettings(array $settings): string
+{
+    foreach (['smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_encryption', 'smtp_from'] as $field) {
+        if (!is_string($settings[$field] ?? null) || strlen($settings[$field]) > ($field === 'smtp_password' ? 1024 : 254)) {
+            return 'Controleer de ingevulde mailinstellingen.';
+        }
+    }
+    $host = trim($settings['smtp_host']);
+    if ($host !== '' && !filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+        return 'Vul een geldige mailserver in, bijvoorbeeld smtp.voorbeeld.nl.';
+    }
+    $port = trim($settings['smtp_port']);
+    if ($port !== '' && !filter_var($port, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]])) {
+        return 'Kies een poort tussen 1 en 65535.';
+    }
+    $from = trim($settings['smtp_from']);
+    if ($from !== '' && !filter_var($from, FILTER_VALIDATE_EMAIL)) { return 'Vul een geldig afzenderadres in.'; }
+    if (!in_array($settings['smtp_encryption'], ['tls', 'ssl', 'none'], true)) { return 'Kies een geldige beveiliging.'; }
+    return '';
+}
+
+function sendShootRequest(array $data, string $recipient, array $settings = []): void
 {
     require_once __DIR__ . '/vendor/autoload.php';
-    $host = getenv('SMTP_HOST') ?: '';
-    $from = getenv('SMTP_FROM') ?: '';
+    $setting = static fn (string $key, string $default = ''): string => ($settings[strtolower($key)] ?? '') !== '' ? $settings[strtolower($key)] : (getenv($key) ?: $default);
+    $host = $setting('SMTP_HOST');
+    $from = $setting('SMTP_FROM');
     if ($host === '' || !filter_var($from, FILTER_VALIDATE_EMAIL) || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('Shoot request mail is not configured.');
     }
-    $encryption = getenv('SMTP_ENCRYPTION') ?: 'tls';
+    $encryption = $setting('SMTP_ENCRYPTION', 'tls');
     if (!in_array($encryption, ['tls', 'ssl', 'none'], true)) {
         throw new RuntimeException('Invalid SMTP encryption setting.');
     }
     $mail = new PHPMailer\PHPMailer\PHPMailer(true);
     $mail->isSMTP();
     $mail->Host = $host;
-    $mail->Port = (int) (getenv('SMTP_PORT') ?: '587');
-    $mail->Username = getenv('SMTP_USERNAME') ?: '';
-    $mail->Password = getenv('SMTP_PASSWORD') ?: '';
+    $mail->Port = (int) $setting('SMTP_PORT', '587');
+    $mail->Username = $setting('SMTP_USERNAME');
+    $mail->Password = $setting('SMTP_PASSWORD');
     $mail->SMTPAuth = $mail->Username !== '';
     $mail->SMTPSecure = $encryption === 'none' ? '' : $encryption;
     $mail->SMTPAutoTLS = $encryption !== 'none';
@@ -99,6 +139,7 @@ function sendShootRequest(array $data, string $recipient): void
     $date = DateTimeImmutable::createFromFormat('!Y-m-d', $data['date'])->format('d-m-Y');
     $mail->Body = "Nieuwe aanvraag via IK WIL OOK\n\n"
         . "Naam: {$data['name']}\nE-mailadres: {$data['email']}\nTelefoonnummer: {$data['phone']}\nGewenste datum: {$date}\n\n"
+        . "Gewenste tijd: {$data['time']}\n\n"
         . "Omschrijving:\n{$data['description']}\n\n"
         . "Dit is een aanvraag; de datum is nog niet bevestigd.\n"
         . "Beantwoord deze mail om contact op te nemen met de aanvrager.\n";

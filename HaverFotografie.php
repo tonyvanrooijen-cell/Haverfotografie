@@ -8,6 +8,8 @@ $_SESSION['shoot_request_token'] ??= bin2hex(random_bytes(32));
 $requestData = shootRequestInput($_POST);
 $requestError = '';
 $requestSent = !empty($_SESSION['shoot_request_sent']);
+$requestSummary = $_SESSION['shoot_request_summary'] ?? [];
+unset($_SESSION['shoot_request_summary']);
 unset($_SESSION['shoot_request_sent']);
 
 // Gebruik expliciet de externe database-instellingen om lokale Docker-overrides te negeren.
@@ -38,6 +40,7 @@ $logoPath = ($assetBasePath !== '' ? rtrim($assetBasePath, '/') : '') . '/logo.p
 $faviconPath = ($assetBasePath !== '' ? rtrim($assetBasePath, '/') : '') . '/favicon.svg';
 $adminDashboardUrl = $adminPath;
 $adminConfigUrl = $adminDashboardUrl . '?config=1';
+$adminEmailUrl = $adminDashboardUrl . '?email=1';
 $adminNewUrl = $adminDashboardUrl . '?new=1';
 $adminVisitsUrl = $adminDashboardUrl . '?visits=1';
 $adminRequestsUrl = $adminDashboardUrl . '?requests=1';
@@ -54,7 +57,9 @@ $admin = $isAdminPath || isset($_GET['admin']) || isset($_GET['new']) || isset($
 $create = isset($_GET['new']);
 $photos = false;
 $display = !$admin || isset($_GET['view']);
-$configScreen = isset($_GET['config']);
+$emailScreen = isset($_GET['email']);
+if ($emailScreen) { $admin = true; $display = false; }
+$configScreen = isset($_GET['config']) && !$emailScreen;
 $visitsScreen = isset($_GET['visits']);
 $requestsScreen = isset($_GET['requests']);
 $requestRows = [];
@@ -105,6 +110,12 @@ if (!$isAdminPath && (isset($_GET['admin']) || isset($_GET['new']) || isset($_GE
 
 $configValues = [
     'shoot_request_email' => '',
+    'smtp_host' => '',
+    'smtp_port' => '',
+    'smtp_username' => '',
+    'smtp_password' => '',
+    'smtp_encryption' => '',
+    'smtp_from' => '',
     'font_family' => 'Arial, sans-serif',
     'background_color' => '#ffffff',
     'header_color' => '#111111',
@@ -632,12 +643,23 @@ try {
     }
 
     if ($requestsScreen) {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete-request') {
+            $deleteToken = is_string($_POST['request_token'] ?? null) ? $_POST['request_token'] : '';
+            $deleteId = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if (!hash_equals($_SESSION['shoot_request_token'], $deleteToken) || !$deleteId) {
+                http_response_code(400);
+                exit('Ongeldige verwijderaanvraag. Ga terug en probeer opnieuw.');
+            }
+            deleteShootRequest($pdo, $deleteId);
+            header('Location: ' . $adminRequestsUrl . '&page=' . $requestPage, true, 303);
+            exit;
+        }
         $display = false;
         $configScreen = $visitsScreen = $edit = $create = $photos = false;
         $requestCount = (int) $pdo->query('SELECT COUNT(*) FROM HaverFotografieRequests')->fetchColumn();
         $requestPages = max(1, (int) ceil($requestCount / 20));
         $requestPage = min($requestPage, $requestPages);
-        $requestRows = $pdo->query('SELECT id, name, email, phone, requested_date, description, created_at, mail_status FROM HaverFotografieRequests ORDER BY id DESC LIMIT 20 OFFSET ' . (($requestPage - 1) * 20))->fetchAll();
+        $requestRows = $pdo->query('SELECT id, name, email, phone, requested_date, requested_time, description, created_at, mail_status FROM HaverFotografieRequests ORDER BY id DESC LIMIT 20 OFFSET ' . (($requestPage - 1) * 20))->fetchAll();
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isShootRequest) {
@@ -660,10 +682,11 @@ try {
                 }
                 if ($requestError === '') {
                     $_SESSION['shoot_request_sent'] = true;
+                    $_SESSION['shoot_request_summary'] = $requestData;
                     $_SESSION['shoot_request_token'] = bin2hex(random_bytes(32));
                     $mailStatus = 'sent';
                     try {
-                        sendShootRequest($requestData, $configValues['shoot_request_email']);
+                        sendShootRequest($requestData, $configValues['shoot_request_email'], $configValues);
                     } catch (Throwable $e) {
                         $mailStatus = 'failed';
                         error_log('Shoot request mail failed for request ' . $savedRequestId . ': ' . get_class($e));
@@ -688,25 +711,36 @@ try {
             exit;
         }
 
-        if (($_POST['action'] ?? '') === 'config') {
+        if (in_array($_POST['action'] ?? '', ['config', 'email-config'], true)) {
+            $savingEmail = $_POST['action'] === 'email-config';
             $recipient = is_string($_POST['shoot_request_email'] ?? null) ? trim($_POST['shoot_request_email']) : '';
             $configToken = is_string($_POST['config_token'] ?? null) ? $_POST['config_token'] : '';
             if (!hash_equals($_SESSION['shoot_request_token'], $configToken)) {
                 $errorMessage = 'Het configuratieformulier is verlopen. Probeer het opnieuw.';
                 $configScreen = true;
-            } elseif (!is_string($_POST['shoot_request_email'] ?? '') || ($recipient !== '' && (strlen($recipient) > 254 || !filter_var($recipient, FILTER_VALIDATE_EMAIL)))) {
+            } elseif ($savingEmail && (!is_string($_POST['shoot_request_email'] ?? '') || ($recipient !== '' && (strlen($recipient) > 254 || !filter_var($recipient, FILTER_VALIDATE_EMAIL))))) {
                 $errorMessage = 'Vul een geldig e-mailadres voor shootaanvragen in.';
                 $configScreen = true;
+            } elseif ($savingEmail && ($mailSettingsError = validateMailSettings($_POST)) !== '') {
+                $errorMessage = $mailSettingsError;
             } else {
+                $pdo->beginTransaction();
                 foreach ($configValues as $name => $currentValue) {
+                    $isMailSetting = $name === 'shoot_request_email' || str_starts_with($name, 'smtp_');
+                    if ($isMailSetting !== $savingEmail) { continue; }
                     $value = is_string($_POST[$name] ?? null) ? trim($_POST[$name]) : $currentValue;
+                    if ($name === 'smtp_password') {
+                        $value = is_string($_POST[$name] ?? null) && $_POST[$name] !== '' ? $_POST[$name] : $currentValue;
+                    }
                     $stmt = $pdo->prepare('UPDATE config SET waarde = :waarde WHERE naam = :naam');
                     $stmt->execute(['naam' => $name, 'waarde' => $value]);
                 }
+                $pdo->commit();
 
-                header('Location: ' . $adminDashboardUrl);
+                header('Location: ' . ($savingEmail ? $adminEmailUrl . '&saved=1' : $adminDashboardUrl));
                 exit;
             }
+            if ($savingEmail) { $emailScreen = true; $configScreen = false; $display = false; }
         }
 
         if (($_POST['action'] ?? '') === 'update-prio') {
@@ -792,7 +826,7 @@ try {
                     $photoData = $photoDataStmt->fetch() ?: [];
                 }
             }
-        } elseif (($_POST['action'] ?? '') !== 'config') {
+        } elseif (!in_array($_POST['action'] ?? '', ['config', 'email-config'], true)) {
             $editId = isset($_POST['id']) ? (int) $_POST['id'] : 0;
             $create = $editId === 0;
             foreach ($detailFields as $field) {
@@ -1784,6 +1818,8 @@ try {
             line-height: 1.6;
         }
         .shoot-request-form { display: grid; gap: 12px; }
+        .request-datetime { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
+        .request-datetime-field { display: grid; gap: 12px; min-width: 0; }
         .shoot-request-form label { font-weight: 700; }
         .shoot-request-form input,
         .shoot-request-form textarea {
@@ -2630,6 +2666,25 @@ try {
                 mask-image: linear-gradient(to bottom, #000 48%, transparent 100%);
             }
         }
+        .admin-header { justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+        .admin-header-actions { display: flex; align-items: center; gap: 12px; }
+        .dashboard-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .dashboard-toolbar .dashboard-tabs { flex: 1; min-width: 0; margin-bottom: 0; }
+        .dashboard-toolbar > .button-link { flex-shrink: 0; }
+        .config-grid #font_family { width: 100%; max-width: 620px; box-sizing: border-box; }
+        .request-cards { gap: 10px; margin-top: 14px; }
+        .request-card { padding: 14px 18px; border-radius: 9px; }
+        .request-card h2 { font-size: 18px; }
+        .request-card .request-meta { margin: 6px 0; }
+        .request-card .request-details { gap: 10px; margin: 12px 0; }
+        .request-card .request-description { padding: 10px 12px; line-height: 1.4; }
+        .request-card .form-actions { margin-top: 10px; }
+        @media (max-width: 768px) {
+            .display-contact-link { display: none; }
+            .dashboard-toolbar { flex-wrap: wrap; }
+            .dashboard-toolbar .dashboard-tabs { flex-basis: 100%; }
+            .dashboard-toolbar > .button-link { margin-left: auto; }
+        }
     </style>
 </head>
 <body class="<?php echo $display ? 'display-body' : 'admin-body'; ?>">
@@ -2645,13 +2700,27 @@ try {
                 <?php elseif ($edit): ?>
                 <?php endif; ?>
             </div>
+            <div class="admin-header-actions">
+            <a class="button-link" href="<?php echo h($publicPath); ?>">Weergave</a>
+            <?php if ($isAdminLoggedIn): ?>
+            <form method="post" action="" class="inline-form">
+                <input type="hidden" name="action" value="logout">
+                <button type="submit" class="primary-button secondary-button">Uitloggen</button>
+            </form>
+            <?php endif; ?>
+            </div>
         </header>
         <div class="admin-content">
+            <div class="dashboard-toolbar">
             <nav class="dashboard-tabs" aria-label="Dashboard">
-                <?php foreach ([[$adminDashboardUrl, 'Shoots', !$requestsScreen && !$visitsScreen && !$configScreen], [$adminRequestsUrl, 'Aanvragen', $requestsScreen], [$adminVisitsUrl, 'Bezoeken', $visitsScreen], [$adminConfigUrl, 'Configuratie', $configScreen]] as [$tabUrl, $tabLabel, $tabActive]): ?>
+                <?php foreach ([[$adminDashboardUrl, 'Shoots', !$requestsScreen && !$visitsScreen && !$configScreen && !$emailScreen], [$adminRequestsUrl, 'Aanvragen', $requestsScreen], [$adminVisitsUrl, 'Bezoeken', $visitsScreen], [$adminEmailUrl, 'E-mail', $emailScreen], [$adminConfigUrl, 'Configuratie', $configScreen]] as [$tabUrl, $tabLabel, $tabActive]): ?>
                     <a href="<?php echo h($tabUrl); ?>" class="dashboard-tab<?php echo $tabActive ? ' is-active' : ''; ?>" <?php echo $tabActive ? 'aria-current="page"' : ''; ?>><?php echo h($tabLabel); ?></a>
                 <?php endforeach; ?>
             </nav>
+            <?php if (!$requestsScreen && !$visitsScreen && !$configScreen && !$emailScreen): ?>
+                <a class="button-link" href="<?php echo h($adminNewUrl); ?>">Nieuwe Shoot</a>
+            <?php endif; ?>
+            </div>
     <?php endif; ?>
     <?php if ($requestsScreen): ?>
         <section class="requests-overview" aria-labelledby="requests-title">
@@ -2666,10 +2735,17 @@ try {
                         <p class="request-meta">Aanvraag #<?php echo h($request['id']); ?> &middot; Ontvangen <?php echo h((new DateTimeImmutable($request['created_at'], new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Europe/Amsterdam'))->format('d-m-Y H:i')); ?></p>
                         <dl class="request-details">
                             <div><dt>Gewenste datum</dt><dd><?php echo h((new DateTimeImmutable($request['requested_date']))->format('d-m-Y')); ?></dd></div>
+                            <div><dt>Gewenste tijd</dt><dd><?php echo $request['requested_time'] !== null ? h(substr($request['requested_time'], 0, 5)) : 'Niet opgegeven'; ?></dd></div>
                             <div><dt>E-mailadres</dt><dd><a href="mailto:<?php echo h($request['email']); ?>"><?php echo h($request['email']); ?></a></dd></div>
                             <div><dt>Telefoonnummer</dt><dd><a href="tel:<?php echo h(preg_replace('/[^+0-9]/', '', $request['phone'])); ?>"><?php echo h($request['phone']); ?></a></dd></div>
                         </dl>
                         <div class="request-description"><?php echo nl2br(h($request['description'])); ?></div>
+                        <form method="post" action="<?php echo h($adminRequestsUrl . '&page=' . $requestPage); ?>" class="form-actions" onsubmit="return confirm('Deze aanvraag definitief verwijderen?');">
+                            <input type="hidden" name="action" value="delete-request">
+                            <input type="hidden" name="id" value="<?php echo h($request['id']); ?>">
+                            <input type="hidden" name="request_token" value="<?php echo h($_SESSION['shoot_request_token']); ?>">
+                            <button type="submit" class="primary-button danger-button">Aanvraag verwijderen</button>
+                        </form>
                     </article>
                 <?php endforeach; ?>
             </div>
@@ -2681,17 +2757,39 @@ try {
                 </nav>
             <?php endif; ?>
         </section>
+    <?php elseif ($emailScreen): ?>
+        <h1>E-mailinstellingen</h1>
+        <p>Stel in waar shootaanvragen naartoe gaan en via welke mailserver ze worden verstuurd.</p>
+        <?php if (isset($_GET['saved'])): ?><p role="status">E-mailinstellingen opgeslagen.</p><?php endif; ?>
+        <form method="post" action="<?php echo h($adminEmailUrl); ?>" class="shoot-request-form" style="max-width:640px">
+            <input type="hidden" name="action" value="email-config">
+            <input type="hidden" name="config_token" value="<?php echo h($_SESSION['shoot_request_token']); ?>">
+            <?php foreach (['shoot_request_email' => ['Ontvangstadres aanvragen', 'email'], 'smtp_from' => ['Afzenderadres', 'email'], 'smtp_host' => ['Mailserver (SMTP)', 'text'], 'smtp_port' => ['Poort', 'number'], 'smtp_username' => ['Gebruikersnaam', 'text']] as $field => [$label, $type]): ?>
+                <?php if ($field === 'smtp_host'): ?><div class="request-datetime"><?php endif; ?>
+                <?php if (in_array($field, ['smtp_host', 'smtp_port'], true)): ?><div class="request-datetime-field"><?php endif; ?>
+                <label for="<?php echo h($field); ?>"><?php echo h($label); ?></label>
+                <input id="<?php echo h($field); ?>" name="<?php echo h($field); ?>" type="<?php echo h($type); ?>" <?php echo $type === 'number' ? 'min="1" max="65535"' : 'maxlength="254"'; ?> value="<?php echo h(is_string($_POST[$field] ?? null) ? $_POST[$field] : ($configValues[$field] !== '' ? $configValues[$field] : ($field === 'shoot_request_email' ? '' : (getenv(strtoupper($field)) ?: ($field === 'smtp_port' ? '587' : ''))))); ?>">
+                <?php if (in_array($field, ['smtp_host', 'smtp_port'], true)): ?></div><?php endif; ?>
+                <?php if ($field === 'smtp_port'): ?></div><?php endif; ?>
+            <?php endforeach; ?>
+            <label for="smtp_encryption">Beveiliging</label>
+            <select id="smtp_encryption" name="smtp_encryption">
+                <?php foreach (['tls' => 'STARTTLS (meestal poort 587)', 'ssl' => 'SSL/TLS (meestal poort 465)', 'none' => 'Geen (alleen lokale testserver)'] as $value => $label): ?>
+                    <option value="<?php echo h($value); ?>" <?php echo ($configValues['smtp_encryption'] ?: (getenv('SMTP_ENCRYPTION') ?: 'tls')) === $value ? 'selected' : ''; ?>><?php echo h($label); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <label for="smtp_password">SMTP-wachtwoord</label>
+            <input type="password" id="smtp_password" name="smtp_password" autocomplete="new-password" maxlength="1024">
+            <p>Laat het wachtwoord leeg om het bestaande wachtwoord te behouden. Een leeg ontvangstadres schakelt het aanvraagformulier uit.</p>
+            <button type="submit" class="primary-button">E-mailinstellingen opslaan</button>
+        </form>
     <?php elseif ($configScreen): ?>
         <h1>Configuratie</h1>
-        <p><a href="<?php echo h($adminDashboardUrl); ?>">Terug naar de lijst</a></p>
 
         <form method="post" action="" class="config-grid">
             <input type="hidden" name="action" value="config">
             <input type="hidden" name="config_token" value="<?php echo h($_SESSION['shoot_request_token']); ?>">
 
-            <label for="shoot_request_email">Ontvangstadres shootaanvragen (IK WIL OOK)</label>
-            <input type="email" id="shoot_request_email" name="shoot_request_email" maxlength="254" value="<?php echo h($configValues['shoot_request_email']); ?>" placeholder="naam@voorbeeld.nl">
-            <p>Op dit adres ontvang je de aanvragen. Laat leeg om aanvragen tijdelijk uit te schakelen.</p>
 
             <label for="font_family">Lettertype</label>
             <?php renderConfigSelect('font_family', $configValues['font_family'], [
@@ -2875,12 +2973,24 @@ try {
             </header>
             <div class="display-content">
                 <?php if ($requestView): ?>
+                    <?php if ($requestSent): ?>
+                    <section class="shoot-request-panel" aria-label="Aanvraag ontvangen">
+                        <h1>Bedankt voor je aanvraag!</h1>
+                        <p role="status">Arthur neemt zo snel mogelijk contact met je op!</p>
+                        <?php if ($requestSummary): ?>
+                            <dl class="request-details">
+                                <?php foreach (['name' => 'Naam', 'email' => 'E-mailadres', 'phone' => 'Telefoonnummer', 'date' => 'Gewenste datum', 'time' => 'Gewenste tijd', 'description' => 'Omschrijving'] as $field => $label): ?>
+                                    <div><dt><?php echo h($label); ?></dt><dd><?php echo nl2br(h($requestSummary[$field] ?? '')); ?></dd></div>
+                                <?php endforeach; ?>
+                            </dl>
+                            <?php $whatsappMessage = "Hoi Arthur, ik wil graag een fotoshoot aanvragen.\n\n" . implode("\n", array_map(static fn ($field, $label) => $label . ': ' . ($requestSummary[$field] ?? ''), ['name', 'email', 'phone', 'date', 'time', 'description'], ['Naam', 'E-mailadres', 'Telefoonnummer', 'Gewenste datum', 'Gewenste tijd', 'Omschrijving'])); ?>
+                            <a class="button-link" href="<?php echo h('https://wa.me/31643273002?text=' . rawurlencode($whatsappMessage)); ?>" target="_blank" rel="noopener noreferrer">Aanvragen via WhatsApp</a>
+                        <?php endif; ?>
+                    </section>
+                    <?php else: ?>
                     <section class="shoot-request-panel" aria-labelledby="shoot-request-title">
                         <h1 id="shoot-request-title">IK WIL OOK</h1>
                         <p>Ook een fotoshoot? Vertel wat je in gedachten hebt en op welke datum. We nemen contact met je op om de mogelijkheden te bespreken. Je gewenste datum is pas definitief na bevestiging.</p>
-                        <?php if ($requestSent): ?>
-                            <p role="status">Bedankt! Je aanvraag is ontvangen. We nemen contact met je op.</p>
-                        <?php endif; ?>
                         <?php if ($requestError !== ''): ?>
                             <p class="request-error" role="alert"><?php echo h($requestError); ?></p>
                         <?php endif; ?>
@@ -2898,8 +3008,16 @@ try {
                                 <input type="email" id="request-email" name="email" autocomplete="email" maxlength="254" required value="<?php echo h($requestData['email']); ?>">
                                 <label for="request-phone">Telefoonnummer</label>
                                 <input type="tel" id="request-phone" name="phone" autocomplete="tel" maxlength="40" required value="<?php echo h($requestData['phone']); ?>">
-                                <label for="request-date">Gewenste datum</label>
-                                <input type="date" id="request-date" name="date" min="<?php echo (new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam')))->format('Y-m-d'); ?>" required value="<?php echo h($requestData['date']); ?>">
+                                <div class="request-datetime">
+                                    <div class="request-datetime-field">
+                                        <label for="request-date">Gewenste datum</label>
+                                        <input type="date" id="request-date" name="date" min="<?php echo (new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam')))->format('Y-m-d'); ?>" required value="<?php echo h($requestData['date']); ?>">
+                                    </div>
+                                    <div class="request-datetime-field">
+                                        <label for="request-time">Gewenste tijd</label>
+                                        <input type="time" id="request-time" name="time" required value="<?php echo h($requestData['time']); ?>">
+                                    </div>
+                                </div>
                                 <label for="request-description">Korte omschrijving</label>
                                 <textarea id="request-description" name="description" rows="5" maxlength="4000" required placeholder="Wat voor shoot wil je en voor wie?"><?php echo h($requestData['description']); ?></textarea>
                                 <p>We gebruiken je gegevens om contact met je op te nemen over deze aanvraag.</p>
@@ -2907,6 +3025,7 @@ try {
                             </form>
                         <?php endif; ?>
                     </section>
+                    <?php endif; ?>
                 <?php elseif ($contactView): ?>
                     <section class="contact-panel">
                         <?php if ($contactPhoto !== ''): ?>
@@ -3144,7 +3263,7 @@ try {
                 <?php endif; ?>
             </div>
             <footer class="site-footer">
-                &copy; 2026 Haver Fotografie &middot; Versie 1.02
+                &copy; 2026 Haver Fotografie &middot; Versie 1.03
             </footer>
         </div>
     <?php elseif ($photos): ?>
@@ -3179,7 +3298,6 @@ try {
             <div class="photo-page-actions">
                 <button type="submit" class="primary-button">Foto's opslaan</button>
                 <a class="button-link secondary-button" href="?edit=<?php echo h($photoId); ?>">Naar details</a>
-                <a class="button-link secondary-button" href="<?php echo h($adminDashboardUrl); ?>">Terug naar lijst</a>
             </div>
         </form>
         <form method="post" action="" class="inline-form" onsubmit="return confirm('Weet je zeker dat je deze shoot wilt verwijderen?');">
@@ -3220,7 +3338,6 @@ try {
                 <?php if ($edit && $editId > 0): ?>
                     <a class="button-link secondary-button" href="?photos=<?php echo h($editId); ?>">Naar foto's</a>
                 <?php endif; ?>
-                <a class="button-link secondary-button" href="<?php echo h($adminDashboardUrl); ?>">Terug naar lijst</a>
             </div>
 
             <div class="object-grid">
@@ -3248,7 +3365,7 @@ try {
         <p style="color: #b00020;"><strong><?php echo h($errorMessage); ?></strong></p>
     <?php endif; ?>
 
-    <?php if (!$edit && !$create && !$photos && !$display && !$configScreen && !$visitsScreen && !$requestsScreen): ?>
+    <?php if (!$edit && !$create && !$photos && !$display && !$configScreen && !$visitsScreen && !$requestsScreen && !$emailScreen): ?>
         <?php if (count($rows) === 0): ?>
             <p>Geen shoots gevonden.</p>
         <?php else: ?>
@@ -3303,20 +3420,11 @@ try {
                 </tbody>
             </table>
         <?php endif; ?>
-        <div class="admin-actions">
-            <a class="button-link" href="<?php echo h($adminNewUrl); ?>">Nieuwe shoot</a>
-            <a class="button-link" href="<?php echo h($publicPath); ?>">Weergave</a>
-            <?php if ($isAdminLoggedIn): ?>
-            <form method="post" action="" class="inline-form">
-                <input type="hidden" name="action" value="logout">
-                <button type="submit" class="primary-button secondary-button">Uitloggen</button>
-            </form>
-            <?php endif; ?>
-        </div>
+
     <?php endif; ?>
     <?php if (!$display): ?>
     </div>
-    <footer class="site-footer">&copy; 2026 Haver Fotografie &middot; Versie 1.02</footer>
+    <footer class="site-footer">&copy; 2026 Haver Fotografie &middot; Versie 1.03</footer>
     <?php endif; ?>
     <?php if (!$display): ?>
     </div>

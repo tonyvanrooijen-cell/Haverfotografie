@@ -57,7 +57,7 @@ Voor lokaal ontwikkelen blijft `docker compose up --build` beschikbaar via
 
 Stel in het dashboard onder **Configuratie** het ontvangstadres voor
 shootaanvragen in. Een leeg adres schakelt het formulier uit. Bezoekers vullen
-naam, e-mailadres, telefoonnummer, gewenste datum en een korte omschrijving in.
+naam, e-mailadres, telefoonnummer, gewenste datum en tijd en een korte omschrijving in.
 Alle velden zijn verplicht; dit wordt ook op de server gecontroleerd. De aanvraag
 wordt per mail samengevat; antwoorden op die mail gaat naar de aanvrager.
 Aanvragen worden eerst opgeslagen in `HaverFotografieRequests` in de bestaande
@@ -67,6 +67,9 @@ Configuratie. Aanvragen toont alle gegevens en de mailstatus, met 20 aanvragen
 per pagina en de nieuwste bovenaan. Ook bij een mailfout blijft de aanvraag
 bewaard. Aanvragen zijn geen bevestigde boekingen. Eerder uitsluitend per mail
 verstuurde aanvragen worden niet automatisch teruggehaald.
+De tijdkolom wordt automatisch toegevoegd aan bestaande tabellen; oude aanvragen
+tonen 'Niet opgegeven'. Via 'Aanvraag verwijderen' kan een beheerder na bevestiging
+een aanvraag definitief verwijderen.
 
 De mail wordt via SMTP verstuurd met [PHPMailer](https://github.com/PHPMailer/PHPMailer).
 Stel op de server in `.env` de gegevens van je mailprovider in:

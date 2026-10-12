@@ -5,8 +5,11 @@ function check(bool $condition, string $message): void {
     if (!$condition) { throw new RuntimeException($message); }
 }
 
-$valid = ['name' => 'Test Bezoeker', 'email' => 'visitor@example.test', 'phone' => '+31 6 12345678', 'date' => '2099-06-20', 'description' => 'Een familieshoot met vier personen.'];
+$valid = ['name' => 'Test Bezoeker', 'email' => 'visitor@example.test', 'phone' => '+31 6 12345678', 'date' => '2099-06-20', 'time' => '14:30', 'description' => 'Een familieshoot met vier personen.'];
 check(validateShootRequest($valid) === '', 'Valid request rejected');
+foreach (['24:00', '12:60', '9:30', 'noon'] as $time) {
+    check(validateShootRequest(array_replace($valid, ['time' => $time])) !== '', 'Invalid time accepted');
+}
 foreach (array_keys($valid) as $field) {
     foreach (['', '   ', []] as $emptyValue) {
         check(validateShootRequest(array_replace($valid, [$field => $emptyValue])) !== '', 'Empty ' . $field . ' accepted');
@@ -38,6 +41,7 @@ try {
     check(proc_close($process) === 0, 'SMTP fixture failed');
     $process = null;
     $mail = file_get_contents($capture);
+    check(str_contains($mail, 'Gewenste tijd: 14:30'), 'Time missing in mail');
     foreach (['RCPT TO:<owner@example.test>', 'Reply-To: Test Bezoeker <visitor@example.test>', '20-06-2099', $valid['description'], 'Naam: Test Bezoeker', 'Telefoonnummer: +31 6 12345678'] as $expected) {
         check(str_contains($mail, $expected), 'Missing mail content: ' . $expected);
     }
