@@ -5,10 +5,17 @@ services:
       - '8008:80'
     volumes:
       - './HaverFotografie.php:/var/www/html/index.php:ro'
+      - './shoot-request.php:/var/www/html/shoot-request.php:ro'
       - './admin/index.php:/var/www/html/admin/index.php:ro'
       - './logo.png:/var/www/html/logo.png:ro'
       - './favicon.svg:/var/www/html/favicon.svg:ro'
     environment:
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-tls}
+      SMTP_FROM: ${SMTP_FROM:-}
       DB_HOST: db
       DB_PORT: '3306'
       DB_NAME: CustomerDB

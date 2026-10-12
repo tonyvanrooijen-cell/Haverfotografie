@@ -4,3 +4,5 @@
 .env.*
 *.xlsx
 README.md
+vendor
+tests

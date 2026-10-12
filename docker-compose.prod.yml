@@ -2,6 +2,13 @@ services:
   web:
     image: ${APP_IMAGE:?APP_IMAGE must point to the published GHCR image}
     restart: unless-stopped
+    environment:
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-tls}
+      SMTP_FROM: ${SMTP_FROM:-}
     ports:
       - '${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8008}:80'
     healthcheck:
