@@ -53,6 +53,18 @@ APP_IMAGE=ghcr.io/<owner>/<repository>:<commit-sha> bash ./deploy.sh
 Voor lokaal ontwikkelen blijft `docker compose up --build` beschikbaar via
 `docker-compose.yml`.
 
+## Welkomstteksten
+
+Via het dashboardtabblad **Welkom/SEO** zijn de bovenregel, titel en beschrijving
+over de welkomstfoto afzonderlijk instelbaar. De beschrijving ondersteunt opmaak.
+Een leeg veld verbergt de betreffende tekst. Bij de eerste ingebruikname worden
+de bestaande teksten overgenomen; daarna staan ze los van de hidden-shoot.
+De instellingen worden opgeslagen in de bestaande tabel `config`.
+In hetzelfde tabblad stel je de **SEO-titel homepagina** en **Meta description
+homepagina** in. Deze worden op de homepagina uitgevoerd als `<title>` en
+`<meta name="description">`, los van de zichtbare welkomstteksten. Een lege
+SEO-titel valt terug op `HaverFotografie`.
+
 ## Shootaanvragen via IK WIL OOK
 
 Stel in het dashboard onder **Configuratie** het ontvangstadres voor

@@ -40,6 +40,7 @@ $logoPath = ($assetBasePath !== '' ? rtrim($assetBasePath, '/') : '') . '/logo.p
 $faviconPath = ($assetBasePath !== '' ? rtrim($assetBasePath, '/') : '') . '/favicon.svg';
 $adminDashboardUrl = $adminPath;
 $adminConfigUrl = $adminDashboardUrl . '?config=1';
+$adminWelcomeUrl = $adminDashboardUrl . '?welcome-config=1';
 $adminEmailUrl = $adminDashboardUrl . '?email=1';
 $adminNewUrl = $adminDashboardUrl . '?new=1';
 $adminVisitsUrl = $adminDashboardUrl . '?visits=1';
@@ -59,6 +60,8 @@ $photos = false;
 $display = !$admin || isset($_GET['view']);
 $emailScreen = isset($_GET['email']);
 if ($emailScreen) { $admin = true; $display = false; }
+$welcomeConfigScreen = isset($_GET['welcome-config']);
+if ($welcomeConfigScreen) { $admin = true; $display = false; }
 $configScreen = isset($_GET['config']) && !$emailScreen;
 $visitsScreen = isset($_GET['visits']);
 $requestsScreen = isset($_GET['requests']);
@@ -109,6 +112,11 @@ if (!$isAdminPath && (isset($_GET['admin']) || isset($_GET['new']) || isset($_GE
 }
 
 $configValues = [
+    'welcome_kicker' => 'Fotografie uit Helmond',
+    'welcome_title' => '',
+    'welcome_description' => '',
+    'welcome_seo_title' => 'HaverFotografie',
+    'welcome_meta_description' => '',
     'shoot_request_email' => '',
     'smtp_host' => '',
     'smtp_port' => '',
@@ -547,6 +555,14 @@ function loadConfig(PDO $pdo, array $defaults): array
 {
     ensureConfigTable($pdo);
 
+    // Neem de bestaande welkomsttekst eenmalig over bij het toevoegen van de instellingen.
+    $hasWelcomeTitle = $pdo->query("SELECT 1 FROM config WHERE naam = 'welcome_title'")->fetchColumn();
+    if (!$hasWelcomeTitle) {
+        $welcomeSource = $pdo->query("SELECT titel, oms1 FROM HaverFotografie WHERE LOWER(TRIM(categorie)) = 'hidden' ORDER BY COALESCE(prio, 2147483647), id ASC LIMIT 1")->fetch();
+        $defaults['welcome_title'] = $welcomeSource['titel'] ?? ($pdo->query('SELECT titel FROM HaverFotografie WHERE id = 18')->fetchColumn() ?: '');
+        $defaults['welcome_description'] = cleanRichText($welcomeSource['oms1'] ?? '');
+    }
+
     foreach ($defaults as $name => $value) {
         $stmt = $pdo->prepare('INSERT IGNORE INTO config (naam, waarde) VALUES (:naam, :waarde)');
         $stmt->execute(['naam' => $name, 'waarde' => $value]);
@@ -711,8 +727,9 @@ try {
             exit;
         }
 
-        if (in_array($_POST['action'] ?? '', ['config', 'email-config'], true)) {
+        if (in_array($_POST['action'] ?? '', ['config', 'email-config', 'welcome-config'], true)) {
             $savingEmail = $_POST['action'] === 'email-config';
+            $savingWelcome = $_POST['action'] === 'welcome-config';
             $recipient = is_string($_POST['shoot_request_email'] ?? null) ? trim($_POST['shoot_request_email']) : '';
             $configToken = is_string($_POST['config_token'] ?? null) ? $_POST['config_token'] : '';
             if (!hash_equals($_SESSION['shoot_request_token'], $configToken)) {
@@ -727,8 +744,12 @@ try {
                 $pdo->beginTransaction();
                 foreach ($configValues as $name => $currentValue) {
                     $isMailSetting = $name === 'shoot_request_email' || str_starts_with($name, 'smtp_');
-                    if ($isMailSetting !== $savingEmail) { continue; }
+                    $isWelcomeSetting = str_starts_with($name, 'welcome_');
+                    if ($isMailSetting !== $savingEmail || $isWelcomeSetting !== $savingWelcome) { continue; }
                     $value = is_string($_POST[$name] ?? null) ? trim($_POST[$name]) : $currentValue;
+                    if ($name === 'welcome_description') {
+                        $value = cleanRichText($value);
+                    }
                     if ($name === 'smtp_password') {
                         $value = is_string($_POST[$name] ?? null) && $_POST[$name] !== '' ? $_POST[$name] : $currentValue;
                     }
@@ -737,10 +758,11 @@ try {
                 }
                 $pdo->commit();
 
-                header('Location: ' . ($savingEmail ? $adminEmailUrl . '&saved=1' : $adminDashboardUrl));
+                header('Location: ' . ($savingWelcome ? $adminWelcomeUrl . '&saved=1' : ($savingEmail ? $adminEmailUrl . '&saved=1' : $adminDashboardUrl)));
                 exit;
             }
             if ($savingEmail) { $emailScreen = true; $configScreen = false; $display = false; }
+            if ($savingWelcome) { $welcomeConfigScreen = true; $configScreen = false; $display = false; }
         }
 
         if (($_POST['action'] ?? '') === 'update-prio') {
@@ -1167,7 +1189,10 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>HaverFotografie</title>
+    <title><?php echo h($display && $welcomeView && trim($configValues['welcome_seo_title']) !== '' ? $configValues['welcome_seo_title'] : 'HaverFotografie'); ?></title>
+    <?php if ($display && $welcomeView): ?>
+    <meta name="description" content="<?php echo h($configValues['welcome_meta_description']); ?>">
+    <?php endif; ?>
     <link rel="icon" type="image/svg+xml" href="<?php echo h($faviconPath); ?>">
     <?php if ($needsRichTextEditor): ?>
     <script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js" referrerpolicy="origin"></script>
@@ -2045,56 +2070,6 @@ try {
             transform: translateX(-50%);
             z-index: 2;
         }
-        .welcome-stage .portfolio-overlay {
-            align-items: flex-start;
-            background: linear-gradient(180deg, rgba(0, 0, 0, 0.08) 12%, rgba(0, 0, 0, 0.4) 48%, rgba(0, 0, 0, 0.88) 74%, rgba(0, 0, 0, 1) 100%);
-            padding: clamp(6rem, 34vw, 28rem) 1.5rem 1.5rem;
-            z-index: 1;
-        }
-        .welcome-stage {
-            align-self: flex-start;
-            display: grid;
-            flex: 0 0 auto;
-        }
-        .welcome-stage img {
-            grid-area: 1 / 1;
-            height: auto;
-            width: 100%;
-        }
-        .welcome-stage .portfolio-overlay {
-            grid-area: 1 / 1;
-            position: relative;
-        }
-        .welcome-stage .portfolio-meta {
-            max-width: min(44rem, 100%);
-        }
-        .welcome-stage .hero-title {
-            font-size: clamp(2.5rem, 5vw, 4.8rem);
-            line-height: 0.95;
-            margin: 0;
-            white-space: nowrap;
-        }
-        .welcome-kicker {
-            color: #d7b15f;
-            font-family: var(--display-font);
-            font-size: clamp(1rem, 1.45vw, 1.35rem);
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            margin: 0 0 1.1rem;
-            text-transform: uppercase;
-        }
-        .welcome-description {
-            color: rgba(255, 255, 255, 0.84);
-            font-size: clamp(0.95rem, 1.3vw, 1.1rem);
-            line-height: 1.65;
-            margin-top: 1.25rem;
-        }
-        .welcome-description > :first-child {
-            margin-top: 0;
-        }
-        .welcome-description > :last-child {
-            margin-bottom: 0;
-        }
         .portfolio-nav {
             align-items: center;
             background: rgba(0, 0, 0, 0.38);
@@ -2335,11 +2310,6 @@ try {
             overflow-y: auto;
             padding-bottom: 5.5rem;
             padding-top: 5.5rem;
-        }
-        .display-page.is-welcome .display-content {
-            display: flex;
-            overflow-y: auto;
-            padding: 0;
         }
         .config-grid {
             display: grid;
@@ -2648,23 +2618,6 @@ try {
                 padding-bottom: 4.75rem;
                 padding-top: 4.75rem;
             }
-            .display-page.is-welcome .display-content {
-                -webkit-overflow-scrolling: touch;
-                overflow-x: hidden;
-                overflow-y: auto;
-                padding: 0;
-            }
-            .welcome-stage .portfolio-meta {
-                min-width: 0;
-            }
-            .welcome-stage .hero-title {
-                overflow-wrap: anywhere;
-                white-space: normal;
-            }
-            .welcome-stage img {
-                -webkit-mask-image: linear-gradient(to bottom, #000 48%, transparent 100%);
-                mask-image: linear-gradient(to bottom, #000 48%, transparent 100%);
-            }
         }
         .admin-header { justify-content: space-between; flex-wrap: wrap; gap: 16px; }
         .admin-header-actions { display: flex; align-items: center; gap: 12px; }
@@ -2713,11 +2666,11 @@ try {
         <div class="admin-content">
             <div class="dashboard-toolbar">
             <nav class="dashboard-tabs" aria-label="Dashboard">
-                <?php foreach ([[$adminDashboardUrl, 'Shoots', !$requestsScreen && !$visitsScreen && !$configScreen && !$emailScreen], [$adminRequestsUrl, 'Aanvragen', $requestsScreen], [$adminVisitsUrl, 'Bezoeken', $visitsScreen], [$adminEmailUrl, 'E-mail', $emailScreen], [$adminConfigUrl, 'Configuratie', $configScreen]] as [$tabUrl, $tabLabel, $tabActive]): ?>
+                <?php foreach ([[$adminDashboardUrl, 'Shoots', !$requestsScreen && !$visitsScreen && !$configScreen && !$emailScreen && !$welcomeConfigScreen], [$adminRequestsUrl, 'Aanvragen', $requestsScreen], [$adminVisitsUrl, 'Bezoeken', $visitsScreen], [$adminEmailUrl, 'E-mail', $emailScreen], [$adminWelcomeUrl, 'Welkom/SEO', $welcomeConfigScreen], [$adminConfigUrl, 'Configuratie', $configScreen]] as [$tabUrl, $tabLabel, $tabActive]): ?>
                     <a href="<?php echo h($tabUrl); ?>" class="dashboard-tab<?php echo $tabActive ? ' is-active' : ''; ?>" <?php echo $tabActive ? 'aria-current="page"' : ''; ?>><?php echo h($tabLabel); ?></a>
                 <?php endforeach; ?>
             </nav>
-            <?php if (!$requestsScreen && !$visitsScreen && !$configScreen && !$emailScreen): ?>
+            <?php if (!$requestsScreen && !$visitsScreen && !$configScreen && !$emailScreen && !$welcomeConfigScreen): ?>
                 <a class="button-link" href="<?php echo h($adminNewUrl); ?>">Nieuwe Shoot</a>
             <?php endif; ?>
             </div>
@@ -2782,6 +2735,26 @@ try {
             <input type="password" id="smtp_password" name="smtp_password" autocomplete="new-password" maxlength="1024">
             <p>Laat het wachtwoord leeg om het bestaande wachtwoord te behouden. Een leeg ontvangstadres schakelt het aanvraagformulier uit.</p>
             <button type="submit" class="primary-button">E-mailinstellingen opslaan</button>
+        </form>
+    <?php elseif ($welcomeConfigScreen): ?>
+        <h1>Welkom/SEO</h1>
+        <?php if (isset($_GET['saved'])): ?>
+            <p role="status">De SEO-gegevens en welkomstteksten zijn opgeslagen.</p>
+        <?php endif; ?>
+        <form method="post" action="<?php echo h($adminWelcomeUrl); ?>" class="config-grid">
+            <input type="hidden" name="action" value="welcome-config">
+            <input type="hidden" name="config_token" value="<?php echo h($_SESSION['shoot_request_token']); ?>">
+            <label for="welcome_kicker">Bovenregel</label>
+            <input type="text" id="welcome_kicker" name="welcome_kicker" value="<?php echo h(is_string($_POST['welcome_kicker'] ?? null) ? $_POST['welcome_kicker'] : $configValues['welcome_kicker']); ?>">
+            <label for="welcome_title">Titel</label>
+            <input type="text" id="welcome_title" name="welcome_title" value="<?php echo h(is_string($_POST['welcome_title'] ?? null) ? $_POST['welcome_title'] : $configValues['welcome_title']); ?>">
+            <label for="welcome_description">Beschrijving</label>
+            <textarea id="welcome_description" name="welcome_description" class="rich-text" rows="8"><?php echo h(cleanRichText(is_string($_POST['welcome_description'] ?? null) ? $_POST['welcome_description'] : $configValues['welcome_description'])); ?></textarea>
+            <label for="welcome_seo_title">SEO-titel homepagina</label>
+            <input type="text" id="welcome_seo_title" name="welcome_seo_title" value="<?php echo h(is_string($_POST['welcome_seo_title'] ?? null) ? $_POST['welcome_seo_title'] : $configValues['welcome_seo_title']); ?>">
+            <label for="welcome_meta_description">Meta description homepagina</label>
+            <textarea id="welcome_meta_description" name="welcome_meta_description" rows="3"><?php echo h(is_string($_POST['welcome_meta_description'] ?? null) ? $_POST['welcome_meta_description'] : $configValues['welcome_meta_description']); ?></textarea>
+            <button type="submit" class="primary-button">Welkom en SEO opslaan</button>
         </form>
     <?php elseif ($configScreen): ?>
         <h1>Configuratie</h1>
@@ -3135,16 +3108,20 @@ try {
                     </section>
                 <?php elseif ($welcomeView): ?>
                     <?php if ($welcomeShoot && $welcomePhoto !== ''): ?>
-                        <section class="portfolio-stage welcome-stage">
-                            <img src="<?php echo h($welcomePhoto); ?>" alt="<?php echo h($welcomeShoot['titel']); ?>" decoding="async">
-                            <div class="portfolio-overlay">
-                                <div class="portfolio-meta">
-                                    <p class="welcome-kicker">Fotografie uit Helmond</p>
-                                    <h1 class="hero-title"><?php echo h($hiddenShootDetails['titel'] ?? $welcomeShoot['titel']); ?></h1>
-                                    <?php if (trim(strip_tags($hiddenShootDetails['oms1'] ?? '')) !== ''): ?>
-                                        <div class="welcome-description"><?php echo cleanRichText($hiddenShootDetails['oms1']); ?></div>
+                        <section class="contact-panel">
+                            <div class="contact-visual">
+                                <img class="contact-photo" src="<?php echo h($welcomePhoto); ?>" alt="<?php echo h($welcomeShoot['titel']); ?>" decoding="async">
+                            </div>
+                            <div class="contact-copy">
+                                    <?php if ($configValues['welcome_kicker'] !== ''): ?>
+                                        <span class="contact-copy-kicker"><?php echo h($configValues['welcome_kicker']); ?></span>
                                     <?php endif; ?>
-                                </div>
+                                    <?php if ($configValues['welcome_title'] !== ''): ?>
+                                        <h1><?php echo h($configValues['welcome_title']); ?></h1>
+                                    <?php endif; ?>
+                                    <?php if (trim(strip_tags($configValues['welcome_description'])) !== ''): ?>
+                                        <div class="contact-description"><?php echo cleanRichText($configValues['welcome_description']); ?></div>
+                                    <?php endif; ?>
                             </div>
                         </section>
                     <?php else: ?>
@@ -3263,7 +3240,7 @@ try {
                 <?php endif; ?>
             </div>
             <footer class="site-footer">
-                &copy; 2026 Haver Fotografie &middot; Versie 1.03
+                &copy; 2026 Haver Fotografie &middot; Versie 1.02
             </footer>
         </div>
     <?php elseif ($photos): ?>
@@ -3365,7 +3342,7 @@ try {
         <p style="color: #b00020;"><strong><?php echo h($errorMessage); ?></strong></p>
     <?php endif; ?>
 
-    <?php if (!$edit && !$create && !$photos && !$display && !$configScreen && !$visitsScreen && !$requestsScreen && !$emailScreen): ?>
+    <?php if (!$edit && !$create && !$photos && !$display && !$configScreen && !$visitsScreen && !$requestsScreen && !$emailScreen && !$welcomeConfigScreen): ?>
         <?php if (count($rows) === 0): ?>
             <p>Geen shoots gevonden.</p>
         <?php else: ?>
@@ -3424,7 +3401,7 @@ try {
     <?php endif; ?>
     <?php if (!$display): ?>
     </div>
-    <footer class="site-footer">&copy; 2026 Haver Fotografie &middot; Versie 1.03</footer>
+    <footer class="site-footer">&copy; 2026 Haver Fotografie &middot; Versie 1.02</footer>
     <?php endif; ?>
     <?php if (!$display): ?>
     </div>
