@@ -2,6 +2,11 @@
 
 Projectversie: **1.02** (zie `VERSION`).
 
+De webimage gebruikt PHP **8.2.35** met Apache, inclusief de PHP-beveiligingsfixes
+van 21 oktober 2026. De deploymentbuild haalt de basisimages opnieuw op.
+Een draaiende container wordt pas bijgewerkt na herbouw en vervanging;
+alleen de broncode bijwerken verandert de actieve PHP-versie niet.
+
 Een push naar de standaardbranch bouwt de Docker-image, publiceert deze naar
 `ghcr.io/<owner>/<repository>` en deployt de exacte commit via SSH. De workflow
 kan ook handmatig worden gestart via Actions op de standaardbranch.

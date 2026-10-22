@@ -3240,7 +3240,7 @@ try {
                 <?php endif; ?>
             </div>
             <footer class="site-footer">
-                &copy; 2026 Haver Fotografie &middot; Versie 1.02
+                &copy; 2026 Haver Fotografie &middot; Versie 1.01
             </footer>
         </div>
     <?php elseif ($photos): ?>
@@ -3401,7 +3401,7 @@ try {
     <?php endif; ?>
     <?php if (!$display): ?>
     </div>
-    <footer class="site-footer">&copy; 2026 Haver Fotografie &middot; Versie 1.02</footer>
+    <footer class="site-footer">&copy; 2026 Haver Fotografie &middot; Versie 1.01</footer>
     <?php endif; ?>
     <?php if (!$display): ?>
     </div>

@@ -3,7 +3,7 @@ WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-progress
 
-FROM php:8.2-apache
+FROM php:8.2.35-apache
 
 # Install PDO MySQL extension
 RUN docker-php-ext-install pdo pdo_mysql
